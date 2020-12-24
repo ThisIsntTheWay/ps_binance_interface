@@ -57,8 +57,8 @@ function Create-BinanceDB {
         [string]$q = "CREATE TABLE exchangeTrading (pair VARCHAR(15) PRIMARY KEY, status VARCHAR(10), permission TEXT, quoteAsset VARCHAR(4), date DATETIME)"
             Construct-Query $q $sqlDB
 
-        # user info
-        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, amount INTEGER, date DATETIME)"
+        # User info
+        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, name TEXT, amount INTEGER, free INTEGER, locked INTEGER, date DATETIME)"
             Construct-Query $q $sqlDB
     }
 
