@@ -125,7 +125,7 @@ Write-Host "Please specify an action:" -fore yellow
 Write-Host " 1" -nonewline -fore cyan
     write-host " - Obtain wallet info" -fore yellow
 Write-Host " 2" -nonewline -fore cyan
-    write-host " - Conduct trade" -fore Yellow
+    write-host " - Get ticker price for owned coins" -fore Yellow
 
 Write-Host ""
 $c = Read-Host "> Select an option"
@@ -162,7 +162,43 @@ switch ($c) {
         Write-Host " > Done" -fore green
 
     } "2" {
+        # Obtain asset price
+        Write-Host "Set target quote asset." -fore yellow
+        $quoteAsset = Read-Host ">"
 
+        [string]$q = "Select * from userInfo;"
+            $global:wallet = Construct-Query $q -NoTargetDB $true
+        
+        #$global:price = @()
+
+        $filter = @("USDT","EUR")
+        foreach ($a in $wallet) {
+
+            # Filter coins that do not have a trading pair
+            $skip = $false
+            foreach ($b in $filter) {
+                if ($a.symbol -like $b) {
+                    $skip = $true
+                    break
+                }
+            }
+            
+            # Actually list price
+            if (!($skip)) {
+                # TODO: FIX
+                write-host "CURRENT ASSET: $($a.symbol)" -fore red
+                $p = (Get-AssetPrice $a.symbol $quoteAsset erroraction 'silentlycontinue').content
+
+                # Ugly splits
+                $b = ($p.split(":{},"))[4]
+                $p = $b.split('"')[1]
+
+                Write-Host " > Price for: " -nonewline -fore Yellow
+                    Write-Host "$($a.Symbol)/${quoteAsset}" -NoNewline -fore Magenta
+                    Write-Host " - " -nonewline -fore yellow
+                    Write-Host $p -fore Cyan
+            }
+        }
     }
     default {
         Write-Host "Unkown option, aborting..." -fore red -back black
