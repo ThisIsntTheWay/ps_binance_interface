@@ -1,4 +1,4 @@
-﻿################################
+################################
 ### PS Binance SQLite module ###
 ################################
 
@@ -56,6 +56,10 @@ function Create-BinanceDB {
         # Trading pair table
         [string]$q = "CREATE TABLE exchangeTrading (pair VARCHAR(15) PRIMARY KEY, status VARCHAR(10), permission TEXT, quoteAsset VARCHAR(4), date DATETIME)"
             Construct-Query $q $sqlDB
+
+        # user info
+        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, amount INTEGER, date DATETIME)"
+            Construct-Query $q $sqlDB
     }
 
     return $response
@@ -80,11 +84,12 @@ function Set-BinanceAPI {
     $a = ConvertTo-SecureString $APIkey -AsPlainText -Force
         $secAPIKey = ConvertFrom-SecureString $a
 
-    $a = ConvertTo-SecureString $APIkey -AsPlainText -Force
-        $secAPISecret = ConvertFrom-SecureString $a
+    $b = ConvertTo-SecureString $APISecret -AsPlainText -Force
+        $secAPISecret = ConvertFrom-SecureString $b
 
     # Override vars
     Remove-Variable a
+    Remove-Variable b
     Remove-Variable APIKey
     Remove-Variable APISecret
 
