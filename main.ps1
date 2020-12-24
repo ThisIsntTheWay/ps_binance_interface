@@ -65,7 +65,6 @@ if ($exchange_maintenance) {
 
 Write-Host ""
 Write-Host "Query active trading pairs and save to DB?" -fore yellow
-Write-Host "CAUTION: Will create an API request!" -fore yellow
 $c = Read-Host "> (y/n)"
 Write-Host ""
 
@@ -130,10 +129,38 @@ Write-Host " 2" -nonewline -fore cyan
 
 Write-Host ""
 $c = Read-Host "> Select an option"
+Write-Host ""
 
 switch ($c) {
     "1" {
-        Get-BinanceWalletInfo
+        Write-Host "Acquiring wallet data..."
+
+        # Retrieve Wallet
+        $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,name,free,locked | sort -property Free -Descending
+        
+        Write-Host "Write empty balances into DB?" -fore yellow
+        $c = Read-host "> (y/n)"
+
+        [bool]$noEmpty = $false
+        if ($c -match "n") {
+            $noEmpty = $true
+        }
+
+        Write-Host " > Processing..." -fore yellow
+        [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
+        foreach ($a in $wallet) {
+            # Calculate amount
+            $amount = ($a.free -as [int]) + ($a.locked -as [int])
+
+            if ($noEmpty) {
+                if (!($amount -le 1)) {
+                    [string]$q = "REPLACE INTO userInfo (symbol,name,amount,free,locked,date) VALUES ('$($a.coin)','$($a.name)','$($amount)','$($a.free)','$($a.locked)','${now}')"
+                        Construct-Query $q -NoTargetDB $true
+                }
+            }
+        }
+        Write-Host " > Done" -fore green
+
     } "2" {
 
     }
