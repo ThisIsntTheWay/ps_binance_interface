@@ -93,12 +93,9 @@ function Get-BinanceWalletInfo() {
     #[string]$unixTime = ([int][double]::Parse((Get-Date -UFormat %s)))*1000
     [string]$unixTime = [Math]::Floor([decimal](Get-Date(Get-Date).ToUniversalTime()-uformat "%s")) * 1000
     $basePoint = "${APIBase}/sapi/v1/capital/config/getall?"
-    $message = "recvWindow=20000&timestamp=${unixTime}"
+    $message = "timestamp=${unixTime}"
 
     $signature = Compute-Signature($message)
-
-    write-host "Signature is: " -fore magenta -NoNewline
-        write-host $signature
 
     # Extract APIkey from DB and convert to readable format
     $q = "SELECT APIkey FROM binanceSettings;"
@@ -114,30 +111,6 @@ function Get-BinanceWalletInfo() {
     # Clear key
     Remove-Variable key
     Remove-Variable secKey
-
-    return $out
-}
-
-# Parse Binance API response code
-function Get-BinanceAPICode($in) {
-    [bool]$APIerror = $false
-
-    switch ($in) {
-        "-2014" {
-            $APIerror = $true
-            $out = "Malformed API request"
-        } "200" {
-            $APIerror = $false
-            $out = "Request OK"
-        } "-1002" {
-            $APIerror = $false
-            $out = "Request unauthorized"
-        }
-        default {
-            $APIerror = $true
-            $out = "Unkown API response code: ${in} - Assuming error"
-        }
-    }
 
     return $out
 }
