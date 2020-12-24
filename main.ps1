@@ -63,7 +63,6 @@ if ($exchange_maintenance) {
     Write-Host " > Binance accessible." -fore green
 }
 
-
 Write-Host ""
 Write-Host "Query active trading pairs and save to DB?" -fore yellow
 Write-Host "CAUTION: Will create an API request!" -fore yellow
@@ -78,8 +77,8 @@ if ($c -like "y") {
 
             Write-Host "CAUTION: A filter list has been defined!" -fore yellow -back Black
             Write-Host "Some pairs will be ignored and won't be usable with this trading interface." -fore yellow -back Black
-            Write-Host "Continuing in 5 sec..." -fore DarkGray
-            Start-Sleep -s 5
+            Write-Host "Continuing in 3 sec..." -fore DarkGray
+            Start-Sleep -s 3
 
             Write-Host ""
         }
@@ -119,5 +118,27 @@ if ($c -like "y") {
             $i++
         }
     }
+
+    Write-Host ""
 }
 
+Write-Host "Please specify an action:" -fore yellow
+Write-Host " 1" -nonewline -fore cyan
+    write-host " - Obtain wallet info" -fore yellow
+Write-Host " 2" -nonewline -fore cyan
+    write-host " - Conduct trade" -fore Yellow
+
+Write-Host ""
+$c = Read-Host "> Select an option"
+
+switch ($c) {
+    "1" {
+        Get-BinanceWalletInfo
+    } "2" {
+
+    }
+    default {
+        Write-Host "Unkown option, aborting..." -fore red -back black
+        exit
+    }
+}
