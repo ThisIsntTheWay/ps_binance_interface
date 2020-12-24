@@ -33,35 +33,17 @@ function Get-ExchangeInfo {
 }
 
 # Check trading pair
-function Get-TradingPair {
+function Get-AssetPrice {
     param(
         [Parameter(Mandatory=$true)]
-        [string]$targetPair,
+        [string]$targetAsset,
 
-        [Parameter(Mandatory=$false)]
-        [string]$targetStatus
+        [Parameter(Mandatory=$true)]
+        [string]$targetQuote
     )
 
-    # Function response
-    [string]$response = "NULL"
+    $response = Invoke-WebRequest "${APIBase}/api/v3/ticker/price?symbol=${targetAsset}${targetQuote}" -Headers @{'Content-Type' = 'application/json';}
 
-    foreach ($a in $in.symbols) {
-        if ($a.symbol -match $targetPair) {
-            if ($a.status -match "TRADING") {
-                $response = "'$($a.symbol)' is trading."
-
-                $q = ""
-                Construct-Query($q, $sqlDB)
-            } else {
-                $response = "'$($a.symbol)' is NOT trading."
-                
-                $q = ""
-                Construct-Query($q, $sqlDB)
-            }
-        } else {
-            $response = "Pair not found"
-        }
-    }
     return $response
 }
 
