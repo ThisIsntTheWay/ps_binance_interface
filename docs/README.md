@@ -6,7 +6,7 @@ Be aware that it is not yet complete.
 The script "autoTrade.ps1" facilites automated trading using JSON files.  
 It is **not** a trading bot that employs *trading strategies*.
 
-Examples of these JSON files can be found in /automation/.  
+Examples of these JSON files can be found in '/automation/'.  
 Here's an explanation of a JSON *market* order file:  
 (Note that orders are classified as a *collection*)
 
