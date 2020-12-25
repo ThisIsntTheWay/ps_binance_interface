@@ -2,7 +2,8 @@
 ### Automated trading module ###
 ################################
 
-<#  [NOTE]
+<#  
+    Author: V. Klopfenstein, December 2020
     This thing will execute orders based on JSON data
 #>
 
@@ -18,9 +19,18 @@
 [string]$QuoteAssetFilterList = "./filter/QuoteAssetFilterList.txt"
 [string]$logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
 
-    # Globally control log verbosity
-    # Verbosity meaning: Log to console as well
-    [bool]$logVerbosity = $true
+# Globally control log verbosity
+# Verbosity meaning: Log to console as well
+[bool]$logVerbosity = $true
+
+# User-defined maximum for $quoteAsset
+[int]$quoteAssetLimit = 100
+
+# The following params are applicable:
+# CONTINUE = Ignore limit violation
+# OVERRIDE = Override existing quantity with limit
+# ABORT    = Cancel order with limit violation
+[string]$quoteAssetLimitViolation = "OVERRIDE"
 
 # ---------------------------------
 # FUNCTIONS
@@ -87,7 +97,7 @@ if (Create-BinanceDB -eq 1) {
     exit
 }
 
-log "Querying binance status..."
+log "Querying Binance status..."
 Get-BinanceSysStatus
 if ($exchange_maintenance) {
     log "Binance is under maintenance." "X"
@@ -139,7 +149,7 @@ if ($marketOrders.count -ge 1) {
         log "> Quantity: $($a.$count.quantity)"
         log "> Scheduled for: $($a.$count.schedule)"
 
-        log "Attempting to send order to binance..." ">"
+        log "Attempting to send order to Binance..." ">"
 
         # Send order
         if ($a.$count.sideMode -like "QUOTE") {
