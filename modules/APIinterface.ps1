@@ -62,16 +62,17 @@ function Construct-BinanceAPIRequest {
         $bRequest = "${APIbase}${bUri}"
     }
 
-    write-host "bRequest ist: $bRequest"
 
     # If a signature needs to be passed
     if ($signature) {
         [string]$unixTime = [Math]::Floor([decimal](Get-Date(Get-Date).ToUniversalTime()-uformat "%s")) * 1000
-        $bRequest = "${params}&timestamp=${unixTime}"
-    
-        $rSignature = Compute-Signature($bRequest)
+        [string]$sigParams = "${params}&timestamp=${unixTime}"
+        $rSignature = Compute-Signature($sigParams)
 
-        $bRequest = "${bRquest}&signature=${rSignature}"
+        # Clear bRequest because PS likes to be dumb sometimes
+        Remove-Variable bRequest
+
+        [string]$global:bRequest = "${APIbase}${bUri}?${sigParams}&signature=${rSignature}"
     }
 
     # If an API key needs to be retrieved
@@ -146,10 +147,10 @@ function Set-BinanceSpotOrder {
             [string]$type,
 
         [Parameter(Mandatory=$false)]
-            [int]$Qty,
+            [int]$Qty = 0,
 
         [Parameter(Mandatory=$false)]
-            [int]$quoteQty,
+            [int]$quoteQty = 0,
 
         [Parameter(Mandatory=$false)]
             [int]$price,
@@ -162,31 +163,30 @@ function Set-BinanceSpotOrder {
     switch ($type) {
         "LIMIT" {
             # Param requirement: timeInForce, quantity, price
-            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&newOrderRespType=FULL&timeInForce=GTC&quantity=${Qty}&price=${price}"
             
         } "MARKET" {
-            # Param requirement: Qty OR quoteOrderQty
-
             # If $Qty is specified, then the user wants to trade with X amount of SYMBOL
-            if (-not ([string]::IsNullOrEmpty($Qty))) {
+            if ($qty -gt 0) {
+                $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&newOrderRespType=FULL&quantity=${Qty}"
             }
             # If $quoteQty is specified, then the user wants to trade with X amount of QUOTESYMBOL
-            ElseIf (-not ([string]::IsNullOrEmpty($quoteQty))) {
+            ElseIf ($quoteQty -gt 0) {
+                $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&newOrderRespType=FULL&quoteOrderQty=${quoteQty}"
             }
             else {
                 $response = "Market order cannot be processed: No quantity specified."
                 $synError = $true
                 break
             }
-            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&quantity=${Qty}&price=${price}"
 
         } "STOP_LOSS" {
             # Param requirement: Qty, stopPrice [price]
-            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&newOrderRespType=FULL&timeInForce=GTC&quantity=${Qty}&price=${price}"
 
         } "TAKE_PROFIT" {
             # Param requirement: Qty, stopPrice [price]
-            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&newOrderRespType=FULL&timeInForce=GTC&quantity=${Qty}&price=${price}"
 
         } default {
             $response = "Order type not implemented: '${type}'"
@@ -195,10 +195,12 @@ function Set-BinanceSpotOrder {
         }
     }
 
-    $bURI = "/api/v3/order"
+    #$bURI = "/api/v3/order/"
+    $bURI = "/api/v3/order/test"
 
+    # Pass to API Request constructor
     if (!($synError)) {
-        $response = Construct-BinanceAPIRequest -bURI $string -params $params -method "POST" -apiKey $true -signature $true
+        $response = Construct-BinanceAPIRequest -bURI $bURI -params $params -method "POST" -apiKey $true -signature $true
     }
 
     return $response
