@@ -1,6 +1,6 @@
 # Binance PowerShell interface
 A script to leverage Binance.com access using REST API calls.  
-The script is able to save various data in a SQLite DB.
+The script is able to save various data in a SQLite DB.  
 As such, the module **PSSQLite** must be installed.
 
 ## Note
