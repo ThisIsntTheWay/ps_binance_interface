@@ -33,7 +33,8 @@ function log {
 # MAIN
 # ---------------------------------
 
-Write-Host "CAUTION: No verbose logging in console window!" -fore Yellow 
+Write-Host "CAUTION" -fore yellow -back Black
+Write-Host "Very limited verbose logging in console window!" -fore Yellow
 Write-Host "Please consult '" -NoNewLine -fore yellow
     Write-Host ${logFile} -NoNewLine -fore cyan
     Write-host "'." -fore Yellow
@@ -76,8 +77,65 @@ if (!(Test-Path ".\automation")) {
     mkdir "./automation" | Out-Null
 }
 
+# Query order data
 log "Probing for order data..."
-$marketOrders = Get-ChildItem "./automation" | where {$_ -like "*order_market*.json"}
+$marketOrders = Get-ChildItem "./automation" | where {$_ -like "*order_market*.json"} | select -first 1
 log "> Found $($marketOrders.count) MARKET order(s)."
-$limitOrders = Get-ChildItem "./automation" | where {$_ -like "*order_limit*.json"}
+$limitOrders = Get-ChildItem "./automation" | where {$_ -like "*order_limit*.json"} | select -first 1
 log "> Found $($limitOrders.count) MARKET order(s)."
+
+# Conduct orders
+    # ToDo (low priority)
+    #  > Cycle through ALL JSONs and somehow merge them all together
+if ($marketOrders.count -ge 1) {
+    $global:order = (get-content $marketOrders.FullName) | convertfrom-json
+
+    # Workaround for acquiring order count 
+    [int]$count = 0
+    foreach ($a in $order.orders) {$count ++}
+
+    log "Parsing order collection '$($order.Name)'."
+    log "> Collection type is: '$($order.Type)'"
+    log "> Amount of orders: ${count}"
+
+    log "Beginning processing orders..."
+    [int]$count = 0
+    foreach ($a in $order.orders) {
+        $count++
+        log "Processing order #${count}..."
+        log "> Target asset: $($a.$count.targetAsset)"
+        log "> Quote asset: $($a.$count.quoteAsset)"
+        log "> Side: $($a.$count.side)"
+        log "> Side mode: $($a.$count.sideMode)"
+        log "> Quantity: $($a.$count.quantity)"
+        log "> Scheduled for: $($a.$count.schedule)"
+
+        log "Attempting to send order to binance..." ">"
+
+        # Send order
+        if ($a.$count.sideMode -like "QUOTE") {
+            $global:r = Set-BinanceSpotOrder -symbol $a.$count.targetAsset `
+                                             -quoteSymbol $a.$count.quoteAsset `
+                                             -side $a.$count.side `
+                                             -type $order.Type `
+                                             -quoteQty $a.$count.quantity
+        } else {
+            $global:r = Set-BinanceSpotOrder -symbol $a.$count.targetAsset `
+                                             -quoteSymbol $a.$count.quoteAsset `
+                                             -side $a.$count.side `
+                                             -type $order.Type `
+                                             -Qty $a.$count.quantity
+        }
+
+        log "Full HTTP answer from API call:" ">"
+        Write-Output $r >> $logFile
+    }
+}
+if ($limitOrders.count -ge 1) {
+    $global:order = (get-content $limitOrders.FullName) | convertfrom-json
+}
+
+# END
+log "Reached end of script." "!"
+Write-Host ""
+Write-Host "END" -fore cyan -back BLACK
