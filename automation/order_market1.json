@@ -1,12 +1,15 @@
 {
-	"OrderName": "REEF_USDT",
-	"OrderType": "Buy",
-	"1": {
-		"targetAsset": "REEF",
-		"quoteAsset": "USDT",
-		"type": "Market",
-		"sideMode": "QUOTE",
-		"quantity": "100",
-		"execution": "25.12.2020 21:14:14"
-	}
+	"Name": "CollectionName",
+	"Type": "MARKET",
+	"Orders": [
+		{
+			"description": "Test 1",
+			"targetAsset": "XRP",
+			"quoteAsset": "USDT",
+			"side": "BUY",
+			"sideMode": "QUOTE",
+			"quantity": "100",
+			"schedule": "25.12.2020 21:14:14"
+		}
+	]
 }
