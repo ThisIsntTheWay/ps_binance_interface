@@ -12,7 +12,7 @@ Here's an explanation of a JSON *market* order file:
 
 ```
 {
-	"Name": "MyCollection",	- - - - - - - - - - > Name of the order collection - optional
+	"Name": "MyCollection",	        - - - - - - - - - - > Name of the order collection - optional
 	"Type": "MARKET",		- - - - - - - - - - > Order type (Market / Limit)
 	"Orders": [
 		{
@@ -21,8 +21,8 @@ Here's an explanation of a JSON *market* order file:
 			"quoteAsset": "USDT",     - - - - - > Target quote symbol
 			"side": "BUY",            - - - - - > Type of order (SELL/BUY)
 			"sideMode": "QUOTE",      - - - - - > Specifies with which asset the target asset should be traded with:
-            									  ASSET = Buy/Sell targetAsset using 'quantity * targetAsset'
-                                                  QUOTE = Buy/seöö targetAsset using 'quantity * quoteAsset' 
+                                                              ASSET = Buy/Sell targetAsset using 'quantity * targetAsset'
+                                                              QUOTE = Buy/selltargetAsset using 'quantity * quoteAsset' 
 			"quantity": "1",          - - - - - > Used in tandem with 'sideMode'
 			"schedule": "25.12.2020 21:14:14" - > When the order should be executed by the SCRIPT
 		}
