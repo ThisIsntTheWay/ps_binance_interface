@@ -1,207 +1,226 @@
-# ---------------------------------
-# Import external modules
-# ---------------------------------
-. "./modules/sqlBackend.ps1"
-. "./modules/APIinterface.ps1"
-. "./modules/wssHandler.ps1"
+################################
+### PS Binance API interface ###
+################################
 
 # ---------------------------------
-# VARS
-# ---------------------------------
-$QuoteAssetFilterList = "./filter/QuoteAssetFilterList.txt"
-
-# ---------------------------------
-# MAIN
+# FUNCTIONS
 # ---------------------------------
 
-Write-Host "Starting..." -fore Yellow
-Write-Host ""
+$APIbase = "https://api.binance.com"
 
-Write-Host "Checking if Binance DB already exists..."
-[bool]$newEnv = $false
-if (Create-BinanceDB -eq 1) {
-    Write-Host " > DB already exists." -fore yellow
-} else {
-    Write-Host " > DB created." -fore green
-    $newEnv = $true
-}
-Write-Host ""
+# Get Binance status
+function Get-BinanceSysStatus() {
+    [bool]$exchange_maintenance = $false
 
-# Initiate basic setup if Binance DB was just created.
-if ($newEnv) {
-    Write-Host "[i] This appears to be a new environment." -fore yellow
-    Write-Host "    Beginning first time setup..." -fore yellow
-    Write-Host ""
+	#GET /wapi/v3/systemStatus.html
+	$r = Invoke-RestMethod "${APIbase}/wapi/v3/systemStatus.html"
 
-    Write-Host "You will be prompted to supply your API key and API secret." -fore yellow
-    $a = Read-Host "> API Key" -AsSecureString 
-    $b = Read-Host "> API Secret" -AsSecureString 
-    $c = Read-Host "> API Name (Optional)"
-        if ($c -eq "") {$c = "API access"}
-
-    $a = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($a))
-    $b = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($b))
-
-    # Populate Binance DB
-    Write-Host "Saving..."
-    Set-BinanceAPI $a $b $c
-    if ($?) {
-        Write-Host " > OK" -fore green
+    # If not 0, system maintenance is occurring
+    if ($r.status -ne 0) {
+        [bool]$exchange_maintenance = $true 
+    } else {
+        [bool]$exchange_maintenance = $false
     }
-        Remove-Variable a; Remove-Variable b
 
-    Write-Host ""
+    #Write-Host " [i] Binance status is: " -fore cyan -nonewline
+        #Write-Host $r.status
 }
 
-Write-Host "Querying binance status..." -fore yellow
-Get-BinanceSysStatus
-if ($exchange_maintenance) {
-    Write-Host "[X] ERROR:" -fore Red -back black
-    Write-Host "    Binance is under maintenance." -fore red
-    exit
-} else {
-    Write-Host " > Binance accessible." -fore green
+function Get-BinanceAPIKey {
+    # Extract APIkey from DB and convert to readable format
+    $q = "SELECT APIkey FROM binanceSettings;"
+    [string]$in = (Construct-Query $q $sqlDB).APIKey
+
+    $secKey = $in | convertto-securestring
+    return (New-Object PSCredential "user",$secKey).GetNetworkCredential().Password
 }
 
-Write-Host ""
-Write-Host "Query active trading pairs and save to DB?" -fore yellow
-$c = Read-Host "> (y/n)"
-Write-Host ""
+function Construct-BinanceAPIRequest {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$bURI,
 
-if ($c -like "y") {
-    # Check if a filter list exists.
-    [bool]$filtering = $false
-        if (test-path $QuoteAssetFilterList) {
-            $filtering = $true
+        [Parameter(Mandatory=$false)]
+        [string]$params,
 
-            Write-Host "CAUTION: A filter list has been defined!" -fore yellow -back Black
-            Write-Host "Some pairs will be ignored and won't be usable with this trading interface." -fore yellow -back Black
-            Write-Host "Continuing in 3 sec..." -fore DarkGray
-            Start-Sleep -s 3
+        [Parameter(Mandatory=$false)]
+        [string]$method = "GET",
 
-            Write-Host ""
-        }
+        [Parameter(Mandatory=$false)]
+        [bool]$apiKey = $true,
 
-    Write-Host ""
-    Write-Host "Acquiring trading pair data..." -fore yellow
-    $trading = Get-ExchangeInfo
-    Write-Host " > OK" -fore green
+        [Parameter(Mandatory=$false)]
+        [bool]$signature = $false
+    )
+    # Example:
+    # Construct-BinanceAPIRequest -bURI $string -params $params -type GET -apiKey $true -signature $true
 
-    Write-Host ""
+    # Handle absence of $params
+    if (-not ([string]::IsNullOrEmpty($params))) {
+        $bRequest = "${APIbase}${bUri}?${params}"
+    } else {
+        $bRequest = "${APIbase}${bUri}"
+    }
 
-    # Populate table 'exchangeTrading'
-    Write-Host "Saving exchange data in DB..." -fore yellow
+    write-host "bRequest ist: $bRequest"
 
-    $aLength = ($trading.symbols).Length
-    $i = 1
-    foreach ($a in $trading.symbols) {
-        $skip = $false
+    # If a signature needs to be passed
+    if ($signature) {
+        [string]$unixTime = [Math]::Floor([decimal](Get-Date(Get-Date).ToUniversalTime()-uformat "%s")) * 1000
+        $bRequest = "${params}&timestamp=${unixTime}"
+    
+        $rSignature = Compute-Signature($bRequest)
 
-        if ($filtering) {
-            foreach ($b in (Get-Content $QuoteAssetFilterList)) {
-                if ($a.quoteAsset -like $b) {
-                    $skip = $true
-                }
-            }
-        }
+        $bRequest = "${bRquest}&signature=${rSignature}"
+    }
 
-        if (!($skip)) {
-            Write-Host "    > " -NoNewline
-                write-Host "[${i}] " -fore cyan -nonewline
-                write-Host "Current asset: $($a.symbol)"
+    # If an API key needs to be retrieved
+    if ($apiKey) {
+        $key = Get-BinanceAPIKey
+        $response = Invoke-WebRequest $bRequest -Method $method -Headers @{'X-MBX-APIKEY' = "$key"}
+    } else {
+        $response = Invoke-WebRequest $bRequest -Method $method
+    }
 
-            [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
-            [string]$q = "REPLACE INTO exchangeTrading (pair,status,permission,quoteAsset,date) VALUES ('$($a.symbol)','$($a.status)','$($a.permissions)','$($a.quoteAsset)','${now}')"
-                Construct-Query $q -NoTargetDB $true
+    return $response
+}
+
+# Query exchange info
+function Get-ExchangeInfo {
+    $r = Construct-BinanceAPIRequest -bURI "/api/v3/exchangeInfo" -apiKey $false -signature $false
+    $r = $r.content | convertfrom-json
+    return $r
+}
+
+# Check trading pair
+function Get-AssetPrice {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$targetAsset,
+
+        [Parameter(Mandatory=$true)]
+        [string]$targetQuote
+    )
+
+    $response = Invoke-WebRequest "${APIBase}/api/v3/ticker/price?symbol=${targetAsset}${targetQuote}" -Headers @{'Content-Type' = 'application/json';}
+
+    return $response
+}
+
+# Acquire HMAC SHA256 signature
+function Compute-Signature($message) {
+    # Retrieve APISecret from DB
+    # Afterwards, convert FROM securestring
+    $q = "SELECT APIsecret FROM binanceSettings;"
+    [string]$in = (Construct-Query $q $sqlDB).APISecret
+
+    $secSecret = $in | convertto-securestring
+    $secret = (New-Object PSCredential "user",$secSecret).GetNetworkCredential().Password
+    
+    # Perform HMAC conversion
+    $hmacsha = New-Object System.Security.Cryptography.HMACSHA256
+    $hmacsha.key = [Text.Encoding]::ASCII.GetBytes($secret)
+    $signature = $hmacsha.ComputeHash([Text.Encoding]::ASCII.GetBytes($message))
+    $signature = [System.BitConverter]::ToString($signature) -replace '-', ''
+
+    # Clear secret
+    Remove-Variable secSecret
+    Remove-Variable secret
+    
+    return $signature
+}
+
+# Execute SPOT order
+function Set-BinanceSpotOrder {
+    param(
+        [Parameter(Mandatory=$true)]
+            [string]$symbol,
+
+        [Parameter(Mandatory=$true)]
+            [string]$quoteSymbol,
+
+        [Parameter(Mandatory=$true)]
+            [string]$side,
+
+        [Parameter(Mandatory=$true)]
+            [string]$type,
+
+        [Parameter(Mandatory=$false)]
+            [int]$Qty,
+
+        [Parameter(Mandatory=$false)]
+            [int]$quoteQty,
+
+        [Parameter(Mandatory=$false)]
+            [int]$price,
+
+        [Parameter(Mandatory=$false)]
+            [bool]$test
+    )
+
+    [boolean]$synError = $false
+    switch ($type) {
+        "LIMIT" {
+            # Param requirement: timeInForce, quantity, price
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
             
-            $i++
+        } "MARKET" {
+            # Param requirement: Qty OR quoteOrderQty
+
+            # If $Qty is specified, then the user wants to trade with X amount of SYMBOL
+            if (-not ([string]::IsNullOrEmpty($Qty))) {
+            }
+            # If $quoteQty is specified, then the user wants to trade with X amount of QUOTESYMBOL
+            ElseIf (-not ([string]::IsNullOrEmpty($quoteQty))) {
+            }
+            else {
+                $response = "Market order cannot be processed: No quantity specified."
+                $synError = $true
+                break
+            }
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&quantity=${Qty}&price=${price}"
+
+        } "STOP_LOSS" {
+            # Param requirement: Qty, stopPrice [price]
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
+
+        } "TAKE_PROFIT" {
+            # Param requirement: Qty, stopPrice [price]
+            $params = "symbol=${symbol}${quoteSymbol}&side=${side}&type=${type}&timeInForce=GTC&quantity=${Qty}&price=${price}"
+
+        } default {
+            $response = "Order type not implemented: '${type}'"
+            $synError = $true
+            break
         }
     }
 
-    Write-Host ""
+    $bURI = "/api/v3/order"
+
+    if (!($synError)) {
+        $response = Construct-BinanceAPIRequest -bURI $string -params $params -method "POST" -apiKey $true -signature $true
+    }
+
+    return $response
 }
 
-Write-Host "Please specify an action:" -fore yellow
-Write-Host " 1" -nonewline -fore cyan
-    write-host " - Obtain wallet info" -fore yellow
-Write-Host " 2" -nonewline -fore cyan
-    write-host " - Get ticker price for owned coins" -fore Yellow
+function Get-BinanceWalletInfo() {
+    # Acquire Unix Time
+    #[string]$unixTime = ([int][double]::Parse((Get-Date -UFormat %s)))*1000
+    [string]$unixTime = [Math]::Floor([decimal](Get-Date(Get-Date).ToUniversalTime()-uformat "%s")) * 1000
+    $basePoint = "${APIBase}/sapi/v1/capital/config/getall?"
+    $message = "timestamp=${unixTime}"
 
-Write-Host ""
-$c = Read-Host "> Select an option"
-Write-Host ""
+    $signature = Compute-Signature($message)
 
-switch ($c) {
-    "1" {
-        Write-Host "Acquiring wallet data..."
+    $key = Get-BinanceAPIKey
 
-        # Retrieve Wallet
-        $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,name,free,locked | sort -property Free -Descending
-        
-        Write-Host "Write empty balances into DB?" -fore yellow
-        $c = Read-host "> (y/n)"
+    # Form request
+    $out = Invoke-WebRequest "${basePoint}${message}&signature=${signature}" `
+        -Headers @{'Content-Type' = 'application/json'; 'X-MBX-APIKEY' = "$key"}
 
-        [bool]$noEmpty = $false
-        if ($c -match "n") {
-            $noEmpty = $true
-        }
+    # Clear key
+    Remove-Variable key
 
-        Write-Host " > Processing..." -fore yellow
-        [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
-        foreach ($a in $wallet) {
-            # Calculate amount
-            $amount = ($a.free -as [int]) + ($a.locked -as [int])
-
-            if ($noEmpty) {
-                if (!($amount -le 1)) {
-                    [string]$q = "REPLACE INTO userInfo (symbol,name,amount,free,locked,date) VALUES ('$($a.coin)','$($a.name)','$($amount)','$($a.free)','$($a.locked)','${now}')"
-                        Construct-Query $q -NoTargetDB $true
-                }
-            }
-        }
-        Write-Host " > Done" -fore green
-
-    } "2" {
-        # Obtain asset price
-        Write-Host "Set target quote asset." -fore yellow
-        $quoteAsset = Read-Host ">"
-
-        [string]$q = "Select * from userInfo;"
-            $global:wallet = Construct-Query $q -NoTargetDB $true
-        
-        #$global:price = @()
-
-        $filter = @("USDT","EUR")
-        foreach ($a in $wallet) {
-
-            # Filter coins that do not have a trading pair
-            $skip = $false
-            foreach ($b in $filter) {
-                if ($a.symbol -like $b) {
-                    $skip = $true
-                    break
-                }
-            }
-            
-            # Actually list price
-            if (!($skip)) {
-                # TODO: FIX
-                write-host "CURRENT ASSET: $($a.symbol)" -fore red
-                $p = (Get-AssetPrice $a.symbol $quoteAsset erroraction 'silentlycontinue').content
-
-                # Ugly splits
-                $b = ($p.split(":{},"))[4]
-                $p = $b.split('"')[1]
-
-                Write-Host " > Price for: " -nonewline -fore Yellow
-                    Write-Host "$($a.Symbol)/${quoteAsset}" -NoNewline -fore Magenta
-                    Write-Host " - " -nonewline -fore yellow
-                    Write-Host $p -fore Cyan
-            }
-        }
-    }
-    default {
-        Write-Host "Unkown option, aborting..." -fore red -back black
-        exit
-    }
+    return $out
 }
