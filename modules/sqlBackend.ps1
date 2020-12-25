@@ -80,6 +80,9 @@ function Set-BinanceAPI {
 
     [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm'),"dd.MM.yyyy HH:mm",$null)
 
+    # TODO: Implement better handling of ingress secureString
+    #       The goal is to NOT convert to plaintext beforehand
+
     # Encrypt APIKey and APISecret
     $a = ConvertTo-SecureString $APIkey -AsPlainText -Force
         $secAPIKey = ConvertFrom-SecureString $a
