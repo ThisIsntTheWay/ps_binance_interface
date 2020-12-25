@@ -7,5 +7,5 @@ As such, the module **PSSQLite** must be installed.
 This is *not* a trading bot, nor does it offer the functionality of creating a trading strategy.  
 Although this is planned, there's other stuff that needs fixing at the moment.
 
-This is more of a personal hobby project to learn a bit more about SQL, PS and REST API handling.
-For serious trading 
+This is more of a personal hobby project to learn a bit more about SQL, PS and REST API handling.  
+There's better stuff out there for more serious trading.
