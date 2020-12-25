@@ -2,6 +2,10 @@
 ### PS Binance API interface ###
 ################################
 
+<#  
+    Author: V. Klopfenstein, December 2020
+#>
+
 # ---------------------------------
 # FUNCTIONS
 # ---------------------------------
@@ -195,8 +199,8 @@ function Set-BinanceSpotOrder {
         }
     }
 
-    #$bURI = "/api/v3/order/"
-    $bURI = "/api/v3/order/test"
+    $bURI = "/api/v3/order"
+    #$bURI = "/api/v3/order/test"
 
     # Pass to API Request constructor
     if (!($synError)) {
