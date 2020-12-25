@@ -1,6 +1,14 @@
 # Documentation
 Here you can find some documentation over this whole script.  
-Be aware that it is not yet complete.  
+Be aware that it is not yet complete. 
+
+## Setup  
+Before using any module of this script, you must first execute 'main.ps1'.  
+This will set up the SQLite DB with your API Keys.  
+(The keys are stored as SecureStrings using the key of your current user account.)  
+
+With 'main.ps1' you can then save a snapshot of your wallet and current trading pairs in this DB.  
+Keep in mind that this DB will only be updated whenever 'main.ps1' is executed!  
 
 ## Automated trading
 The script "autoTrade.ps1" facilites automated trading using JSON files.  
