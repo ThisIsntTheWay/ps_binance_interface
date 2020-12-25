@@ -2,6 +2,10 @@
 ### PS Binance SQLite module ###
 ################################
 
+<#  
+    Author: V. Klopfenstein, December 2020
+#>
+
 ipmo pssqlite
 
 # --------------
