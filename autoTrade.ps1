@@ -32,10 +32,12 @@ function log {
         [bool]$verbose = $false
     )
 
-    if ($logVerbosity) {$verbose = $true}
+    Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" >> $logfile
 
     # Verbose output
-    Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" >> $logfile
+    # Override $verbose if verbosity has been globally enabled
+    if ($logVerbosity) {$verbose = $true}
+
     if ($verbose) {
         switch ($logSymbol) {
             "i" {
@@ -44,11 +46,11 @@ function log {
             ">" {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow
             }
-            "X" {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore red -back Red
-            }
             "!" {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow -back Black
+            }
+            "X" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore red -back Red
             }
         }
     }
