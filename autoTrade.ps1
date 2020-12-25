@@ -15,8 +15,12 @@
 # ---------------------------------
 # VARS
 # ---------------------------------
-$QuoteAssetFilterList = "./filter/QuoteAssetFilterList.txt"
-$logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
+[string]$QuoteAssetFilterList = "./filter/QuoteAssetFilterList.txt"
+[string]$logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
+
+    # Globally control log verbosity
+    # Verbosity meaning: Log to console as well
+    [bool]$logVerbosity = $true
 
 # ---------------------------------
 # FUNCTIONS
@@ -24,21 +28,46 @@ $logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
 function log {
     param(
         [string]$in,
-        [string]$logSymbol = "i"
+        [string]$logSymbol = "i",
+        [bool]$verbose = $false
     )
+
+    if ($logVerbosity) {$verbose = $true}
+
+    # Verbose output
     Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" >> $logfile
+    if ($verbose) {
+        switch ($logSymbol) {
+            "i" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in"
+            }
+            ">" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow
+            }
+            "X" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore red -back Red
+            }
+            "!" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow -back Black
+            }
+        }
+    }
 }
 
 # ---------------------------------
 # MAIN
 # ---------------------------------
+Write-Host "[$(Get-Date -Format 'HH:mm:ss')]  -  Script begin..." -fore green
 
-Write-Host "CAUTION" -fore yellow -back Black
-Write-Host "Very limited verbose logging in console window!" -fore Yellow
-Write-Host "Please consult '" -NoNewLine -fore yellow
-    Write-Host ${logFile} -NoNewLine -fore cyan
-    Write-host "'." -fore Yellow
-Write-Host ""
+if (!($logVerbosity)) {
+    Write-Host ""
+    Write-Host "CAUTION" -fore yellow -back Black
+    Write-Host "No verbose output enabled." -fore Yellow
+    Write-Host "Please consult '" -NoNewLine -fore yellow
+        Write-Host ${logFile} -NoNewLine -fore cyan
+        Write-host "'." -fore Yellow
+    Write-Host ""
+}
 
 # Create log dir if it does not exist yet
 If (!(Test-Path "./log")) {
@@ -56,7 +85,6 @@ if (Create-BinanceDB -eq 1) {
     exit
 }
 
-Write-Host "Querying binance status..." -fore yellow
 log "Querying binance status..."
 Get-BinanceSysStatus
 if ($exchange_maintenance) {
@@ -66,7 +94,6 @@ if ($exchange_maintenance) {
     exit
 } else {
     log " > Binance is accessible."
-    Write-Host " > Binance accessible." -fore green
 }
 
 [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
@@ -82,7 +109,7 @@ log "Probing for order data..."
 $marketOrders = Get-ChildItem "./automation" | where {$_ -like "*order_market*.json"} | select -first 1
 log "> Found $($marketOrders.count) MARKET order(s)."
 $limitOrders = Get-ChildItem "./automation" | where {$_ -like "*order_limit*.json"} | select -first 1
-log "> Found $($limitOrders.count) MARKET order(s)."
+log "> Found $($limitOrders.count) LIMIT order(s)."
 
 # Conduct orders
     # ToDo (low priority)
