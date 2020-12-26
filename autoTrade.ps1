@@ -24,17 +24,17 @@
 [bool]$logVerbosity = $true
 
 # User-defined maximum for $quoteAsset
-[int]$quoteAssetLimit = 9999
+[int]$quoteAssetLimit = 100
 
 # How to handle an excess of quoteAsset during orders.
-[string]$quoteAssetLimitViolation = "IGNORE"
+[string]$quoteAssetLimitViolation = "OVERRIDE"
     # The following params are applicable:
     # CONTINUE = Ignore limit violation
     # OVERRIDE = Override existing quantity with limit
     # ABORT    = Cancel order with limit violation
 
 # How to handle a deficiency of quoteAsset during orders.
-[string]$quoteAssetInsufficency = "ABORT"
+[string]$quoteAssetInsufficency = "OVERRIDE"
     # The following params are applicable:
     # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
     # ABORT    = Cancel order with insufficient quoteAsset amount
@@ -187,34 +187,19 @@ if ($marketOrders.count -ge 1) {
         $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
         #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
 
+        $quantity = $a.quantity
+
         # Verify that $a.quantity does not exceed $quoteAssetLimit and does not exceed max available funds in wallet.
         $skip = $false
         if ($a.sideMode -like "QUOTE") {
-            # Check if order exceeds max available quoteAsset in user wallet
-            if (($walletQuote.Free -as [Decimal]) -lt ($a.quantity -as [Decimal])) {
-                log "User does not possess sufficient $($a.quoteAsset) to cover this order." "!"
-                log "> Available: $($walletQuote.Free) | Required: $($a.quantity)" "!"
-
-                # Decide how to continue
-                switch ($quoteAssetInsufficency) {
-                    "OVERRIDE" {
-                        log "> Quote asset quantity ($($a.quantity)) has been lowered to max. availability ($($walletQuote.free))." "!"
-                        $quantity = $quoteAssetLimit
-                    } "ABORT" {
-                        log "> This order will be discarded." "X"
-                        $skip = $true
-                    }
-                }
-            }
-
             # Check quoteAssetLimit
-            if ($a.quantity -gt $quoteAssetLimit) {
+            if ($quantity -gt $quoteAssetLimit) {
                     log "This order exceeds a quote asset limit of '${quoteAssetLimit}'." "!"
                 switch ($quoteAssetLimitViolation) {
                     "CONTINUE" {
                         log "> Continuing anyway..." "i"
                     } "OVERRIDE" {
-                        log "> Quote asset quantity ($($a.quantity)) has been lowered to the limit size (${quoteAssetLimit})." "!"
+                        log "> Quote asset quantity (${quantity}) has been lowered to the limit size (${quoteAssetLimit})." "!"
                         $quantity = $quoteAssetLimit
                     } "ABORT" {
                         log "> This order will be discarded." "X"
@@ -222,7 +207,24 @@ if ($marketOrders.count -ge 1) {
                     }
                 }
             } else {
-                $a.quantity = $quoteAssetLimit
+                $quantity = $a.quantity
+            }
+
+            # Check if order exceeds max available quoteAsset in user wallet
+            if (($walletQuote.Free -as [Decimal]) -lt ($quantity -as [Decimal])) {
+                log "User does not possess sufficient $($a.quoteAsset) to cover this order." "!"
+                log "> Available: $($walletQuote.Free) | Required: ${quantity}" "!"
+
+                # Decide how to continue
+                switch ($quoteAssetInsufficency) {
+                    "OVERRIDE" {
+                        log "> Quote asset quantity (${quantity}) has been lowered to max. availability ($($walletQuote.free))." "!"
+                        $quantity = $walletQuote.free
+                    } "ABORT" {
+                        log "> This order will be discarded." "X"
+                        $skip = $true
+                    }
+                }
             }
         }
 
@@ -238,7 +240,7 @@ if ($marketOrders.count -ge 1) {
                                                      -quoteSymbol $a.quoteAsset `
                                                      -side $a.side `
                                                      -type $order.Type `
-                                                     -quoteQty $a.quantity `
+                                                     -quoteQty $quantity `
                                                      -test $testOrders `
                                                      -ErrorAction SilentlyContinue
                 } catch {
