@@ -27,7 +27,7 @@
 [int]$quoteAssetLimit = 100
 
 # How to handle an excess of quoteAsset during orders.
-[string]$quoteAssetLimitViolation = "OVERRIDE"
+[string]$quoteAssetLimitViolation = "CONTINUE"
     # The following params are applicable:
     # CONTINUE = Ignore limit violation
     # OVERRIDE = Override existing quantity with limit
@@ -137,8 +137,6 @@ if ($exchange_maintenance) {
     log "> Binance is accessible."
 }
 
-[datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
-
 # Create list of potential orders
 if (!(Test-Path ".\automation")) {
     log "'./automation' does not yet exist, creating..."
@@ -182,103 +180,119 @@ if ($marketOrders.count -ge 1) {
         log "> Quantity: $($a.quantity)"
         log "> Scheduled for: $($a.schedule)"
 
-        # Obtain wallet info
-        $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,free
-        $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
-        #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
+        # Check if this order is scheduled
+        [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
+        [datetime]$schedule =[datetime]::ParseExact($a.schedule,"dd.MM.yyyy HH:mm:ss",$null)
 
-        $quantity = $a.quantity
-
-        # Verify that $a.quantity does not exceed $quoteAssetLimit and does not exceed max available funds in wallet.
-        $skip = $false
-        if ($a.sideMode -like "QUOTE") {
-            # Check quoteAssetLimit
-            if ($quantity -gt $quoteAssetLimit) {
-                    log "This order exceeds a quote asset limit of '${quoteAssetLimit}'." "!"
-                switch ($quoteAssetLimitViolation) {
-                    "CONTINUE" {
-                        log "> Continuing anyway..." "i"
-                    } "OVERRIDE" {
-                        log "> Quote asset quantity (${quantity}) has been lowered to the limit size (${quoteAssetLimit})." "!"
-                        $quantity = $quoteAssetLimit
-                    } "ABORT" {
-                        log "> This order will be discarded." "X"
-                        $skip = $true
-                    }
-                }
-            } else {
-                $quantity = $a.quantity
-            }
-
-            # Check if order exceeds max available quoteAsset in user wallet
-            if (($walletQuote.Free -as [Decimal]) -lt ($quantity -as [Decimal])) {
-                log "User does not possess sufficient $($a.quoteAsset) to cover this order." "!"
-                log "> Available: $($walletQuote.Free) | Required: ${quantity}" "!"
-
-                # Decide how to continue
-                switch ($quoteAssetInsufficency) {
-                    "OVERRIDE" {
-                        log "> Quote asset quantity (${quantity}) has been lowered to max. availability ($($walletQuote.free))." "!"
-                        $quantity = $walletQuote.free
-                    } "ABORT" {
-                        log "> This order will be discarded." "X"
-                        $skip = $true
-                    }
-                }
-            }
+        [bool]$cleared = $false
+        if ($now -gt $schedule) {
+            log "- Cleared for execution." "i"
+            $cleared = $true
+        } else {
+            log "- Not yet cleared for execution." "X"
         }
 
-        # Abort order execution if $skip has been set to true
-        if (!($skip)) {
-            log "Attempting to send order to Binance..." ">"
-    
-            # Send order
-            $nocpmplete = $false
+        # Process order if cleared
+        if ($cleared) {
+            # Obtain wallet info
+            $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,free
+            $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
+            #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
+
+            $quantity = $a.quantity
+
+            # Verify that $a.quantity does not exceed $quoteAssetLimit and does not exceed max available funds in wallet.
+            $skip = $false
             if ($a.sideMode -like "QUOTE") {
-                try {
-                    $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
-                                                     -quoteSymbol $a.quoteAsset `
-                                                     -side $a.side `
-                                                     -type $order.Type `
-                                                     -quoteQty $quantity `
-                                                     -test $testOrders `
-                                                     -ErrorAction SilentlyContinue
-                } catch {
-                    $nocomplete = $true
-                }                                                 
-            } elseIf ($a.sideMode -like "ASSET") {
-                try {
-                    $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
-                                                     -quoteSymbol $a.quoteAsset `
-                                                     -side $a.side `
-                                                     -type $order.Type `
-                                                     -Qty $a.quantity `
-                                                     -test $testOrders `
-                                                     -ErrorAction SilentlyContinue
-                } catch {
-                    $nocomplete = $true
-                }    
-            } else {
-                $nocomplete = $true
-                log "> Unkown order side: $($a.sideMode)" "X"
-                log "  Order was not dispatched." "X"
-            }
-                
-            if ($nocomplete) {
-                # Check if the last command was successful, and if it was from invoke-webrequest
-                #if ($error[0].InvocationInfo.MyCommand.Name -like "Invoke-WebRequest") {}
-                $err = ($error[0].errordetails.message | convertfrom-json)
+                # Check quoteAssetLimit
+                if ($quantity -gt $quoteAssetLimit) {
+                        log "This order exceeds the quote asset limit of '${quoteAssetLimit}'." "!"
+                    switch ($quoteAssetLimitViolation) {
+                        "CONTINUE" {
+                            log "> Continuing anyway..." "i"
+                        } "OVERRIDE" {
+                            log "> Quote asset quantity (${quantity}) has been lowered to the limit size (${quoteAssetLimit})." "i"
+                            $quantity = $quoteAssetLimit
+                        } "ABORT" {
+                            log "> This order will be discarded." "X"
+                            $skip = $true
+                        }
+                    }
+                } else {
+                    $quantity = $a.quantity
+                }
 
-                log "Order was not executed by Binance." "X"
-                log "API response: '$($err.code) - $($err.msg)'" "X"
-            } else {
-                log "Order sent to binance successfully." "${chkMrk}"
-                Write-Output $r >> $logFile
+                # Check if order exceeds max available quoteAsset in user wallet
+                if (($walletQuote.Free -as [Decimal]) -lt ($quantity -as [Decimal])) {
+                    log "User does not possess sufficient '$($a.quoteAsset)' to cover this order." "!"
+                    log "> Available: $($walletQuote.Free) | Required: ${quantity}" "!"
+
+                    # Decide how to continue
+                    switch ($quoteAssetInsufficency) {
+                        "OVERRIDE" {
+                            log "> Quote asset quantity (${quantity}) has been lowered to max. availability ($($walletQuote.free))." "i"
+                            $quantity = $walletQuote.free
+                        } "ABORT" {
+                            log "> This order will be discarded." "X"
+                            $skip = $true
+                        }
+                    }
+                }
             }
-            log "END processing order #${count}."
+
+            # Abort order execution if $skip has been set to true
+            if (!($skip)) {
+                log "Attempting to send order to Binance..." ">"
+        
+                # Send order
+                $nocpmplete = $false
+                if ($a.sideMode -like "QUOTE") {
+                    try {
+                        $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
+                                                        -quoteSymbol $a.quoteAsset `
+                                                        -side $a.side `
+                                                        -type $order.Type `
+                                                        -quoteQty $quantity `
+                                                        -test $testOrders `
+                                                        -ErrorAction SilentlyContinue
+                    } catch {
+                        $nocomplete = $true
+                    }                                                 
+                } elseIf ($a.sideMode -like "ASSET") {
+                    try {
+                        $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
+                                                        -quoteSymbol $a.quoteAsset `
+                                                        -side $a.side `
+                                                        -type $order.Type `
+                                                        -Qty $a.quantity `
+                                                        -test $testOrders `
+                                                        -ErrorAction SilentlyContinue
+                    } catch {
+                        $nocomplete = $true
+                    }    
+                } else {
+                    $nocomplete = $true
+                    log "> Unkown order side: $($a.sideMode)" "X"
+                    log "  Order was not dispatched." "X"
+                }
+                    
+                if ($nocomplete) {
+                    # Check if the last command was successful, and if it was from invoke-webrequest
+                    #if ($error[0].InvocationInfo.MyCommand.Name -like "Invoke-WebRequest") {}
+                    $err = ($error[0].errordetails.message | convertfrom-json)
+
+                    log "Order was not executed by Binance." "X"
+                    log "API response: '$($err.code) - $($err.msg)'" "X"
+                } else {
+                    log "Order sent to binance successfully." "${chkMrk}"
+                    Write-Output $r >> $logFile
+                }
+            }
         }
+        log "END processing order #${count}."
     }
 }
+
 if ($limitOrders.count -ge 1) {
     $global:order = (get-content $limitOrders.FullName) | convertfrom-json
 }
