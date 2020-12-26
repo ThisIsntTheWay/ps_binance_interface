@@ -24,13 +24,26 @@
 [bool]$logVerbosity = $true
 
 # User-defined maximum for $quoteAsset
-[int]$quoteAssetLimit = 0
+[int]$quoteAssetLimit = 9999
 
-# The following params are applicable:
-# CONTINUE = Ignore limit violation
-# OVERRIDE = Override existing quantity with limit
-# ABORT    = Cancel order with limit violation
-[string]$quoteAssetLimitViolation = "OVERRIDE"
+# How to handle an excess of quoteAsset during orders.
+[string]$quoteAssetLimitViolation = "IGNORE"
+    # The following params are applicable:
+    # CONTINUE = Ignore limit violation
+    # OVERRIDE = Override existing quantity with limit
+    # ABORT    = Cancel order with limit violation
+
+# How to handle a deficiency of quoteAsset during orders.
+[string]$quoteAssetInsufficency = "ABORT"
+    # The following params are applicable:
+    # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
+    # ABORT    = Cancel order with insufficient quoteAsset amount
+
+# Decides whether all orders should be executed for real or not.
+[bool]$testOrders = $true
+
+# Custom symbols
+$chkMrk = [Char]8730
 
 # ---------------------------------
 # FUNCTIONS
@@ -38,7 +51,7 @@
 function log {
     param(
         [string]$in,
-        [string]$logSymbol = "i",
+        [string]$logSymbol = "-",
         [bool]$verbose = $false
     )
 
@@ -50,17 +63,26 @@ function log {
 
     if ($verbose) {
         switch ($logSymbol) {
-            "i" {
+            "-" {
                 Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in"
             }
+            "i" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Cyan
+            }
             ">" {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Yellow
             }
             "!" {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore yellow -back Black
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Yellow -Back Black
             }
             "X" {
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore red -back Black
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Red -Back Black
+            }
+            "${chkMrk}" {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Green
+            }
+            default {
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" -fore Magenta
             }
         }
     }
@@ -97,6 +119,13 @@ if (Create-BinanceDB -eq 1) {
     exit
 }
 
+# Output various data
+log "The following parameters have been defined:" "i"
+log "> Quote asset limit: $quoteAssetLimit" "i"
+log "> Quote asset limit handling: $quoteAssetLimitViolation" "i"
+log "> Quote asset insufficiency handling: $quoteAssetInsufficency" "i"
+log "> Send orders to API test endpoint: $testOrders" "i"
+
 log "Querying Binance status..."
 Get-BinanceSysStatus
 if ($exchange_maintenance) {
@@ -105,7 +134,7 @@ if ($exchange_maintenance) {
     Write-Host "    Binance is under maintenance." -fore red
     exit
 } else {
-    log " > Binance is accessible."
+    log "> Binance is accessible."
 }
 
 [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
@@ -119,9 +148,9 @@ if (!(Test-Path ".\automation")) {
 # Query order data
 log "Probing for order data..."
 $marketOrders = Get-ChildItem "./automation" | where {$_ -like "*order_market*.json"} | select -first 1
-log "> Found $($marketOrders.count) MARKET order(s)."
+log "> Found $($marketOrders.count) MARKET order(s)." "i"
 $limitOrders = Get-ChildItem "./automation" | where {$_ -like "*order_limit*.json"} | select -first 1
-log "> Found $($limitOrders.count) LIMIT order(s)."
+log "> Found $($limitOrders.count) LIMIT order(s)." "i"
 
 # Conduct orders
     # ToDo (low priority)
@@ -138,14 +167,14 @@ if ($marketOrders.count -ge 1) {
     foreach ($a in $order.orders) {$count ++}
 
     log "Parsing order collection '$($order.Name)'."
-    log "> Collection type is: '$($order.Type)'"
-    log "> Amount of orders: ${count}"
+    log "> Collection type is: '$($order.Type)'" "i"
+    log "> Amount of orders: ${count}" "i"
 
-    log "Beginning processing orders..."
+    log "Now processing orders..."
     [int]$count = 0
     foreach ($a in $order.orders) {
         $count++
-        log "BEING rocessing order #${count}..."
+        log "BEGIN processing order #${count}..."
         log "> Target asset: $($a.targetAsset)"
         log "> Quote asset: $($a.quoteAsset)"
         log "> Side: $($a.side)"
@@ -153,9 +182,32 @@ if ($marketOrders.count -ge 1) {
         log "> Quantity: $($a.quantity)"
         log "> Scheduled for: $($a.schedule)"
 
-        # Verify that $a.quantity does not exceed $quoteAssetLimit
+        # Obtain wallet info
+        $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,free
+        $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
+        #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
+
+        # Verify that $a.quantity does not exceed $quoteAssetLimit and does not exceed max available funds in wallet.
         $skip = $false
         if ($a.sideMode -like "QUOTE") {
+            # Check if order exceeds max available quoteAsset in user wallet
+            if (($walletQuote.Free -as [Decimal]) -lt ($a.quantity -as [Decimal])) {
+                log "User does not possess sufficient $($a.quoteAsset) to cover this order." "!"
+                log "> Available: $($walletQuote.Free) | Required: $($a.quantity)" "!"
+
+                # Decide how to continue
+                switch ($quoteAssetInsufficency) {
+                    "OVERRIDE" {
+                        log "> Quote asset quantity ($($a.quantity)) has been lowered to max. availability ($($walletQuote.free))." "!"
+                        $quantity = $quoteAssetLimit
+                    } "ABORT" {
+                        log "> This order will be discarded." "X"
+                        $skip = $true
+                    }
+                }
+            }
+
+            # Check quoteAssetLimit
             if ($a.quantity -gt $quoteAssetLimit) {
                     log "This order exceeds a quote asset limit of '${quoteAssetLimit}'." "!"
                 switch ($quoteAssetLimitViolation) {
@@ -186,7 +238,8 @@ if ($marketOrders.count -ge 1) {
                                                      -quoteSymbol $a.quoteAsset `
                                                      -side $a.side `
                                                      -type $order.Type `
-                                                     -quoteQty $a.quantity  `
+                                                     -quoteQty $a.quantity `
+                                                     -test $testOrders `
                                                      -ErrorAction SilentlyContinue
                 } catch {
                     $nocomplete = $true
@@ -198,8 +251,8 @@ if ($marketOrders.count -ge 1) {
                                                      -side $a.side `
                                                      -type $order.Type `
                                                      -Qty $a.quantity `
+                                                     -test $testOrders `
                                                      -ErrorAction SilentlyContinue
-                                                     write-host $error[0].errordetails.message
                 } catch {
                     $nocomplete = $true
                 }    
@@ -217,7 +270,7 @@ if ($marketOrders.count -ge 1) {
                 log "Order was not executed by Binance." "X"
                 log "API response: '$($err.code) - $($err.msg)'" "X"
             } else {
-                log "Order sent to binance successfully."
+                log "Order sent to binance successfully." "${chkMrk}"
                 Write-Output $r >> $logFile
             }
             log "END processing order #${count}."
