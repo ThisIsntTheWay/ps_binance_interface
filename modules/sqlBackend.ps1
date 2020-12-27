@@ -7,9 +7,15 @@
 #>
 
 ipmo pssqlite
+if (!($?)) {
+    Write-Host "Failure during import of PSSQLite." -fore red -back Black
+    exit
+}
 
-# --------------
-# VARS
+# ---------------------------------
+# VARIABLES
+# ---------------------------------
+
 $sqlDB = ".\bdb.db"
 
 # ---------------------------------
@@ -53,16 +59,23 @@ function Create-BinanceDB {
     }
 
     if (!($response -eq 1)) {
+        # NOTE: All date fileds are purposefully created as "TEXT".
+        #       This is because there have been some bugs trying to insert/replace DateTime vars into this column.
+
         # Base table
-        [string]$q = "CREATE TABLE binanceSettings (APIkey TEXT PRIMARY KEY, APIsecret TEXT, APIname TEXT, date DATETIME)"
+        [string]$q = "CREATE TABLE binanceSettings (APIkey TEXT PRIMARY KEY, APIsecret TEXT, APIname TEXT, date TEXT)"
             Construct-Query $q $sqlDB
 
         # Trading pair table
-        [string]$q = "CREATE TABLE exchangeTrading (pair VARCHAR(15) PRIMARY KEY, status VARCHAR(10), permission TEXT, quoteAsset VARCHAR(4), date DATETIME)"
+        [string]$q = "CREATE TABLE exchangeTrading (pair VARCHAR(15) PRIMARY KEY, status VARCHAR(10), permission TEXT, quoteAsset VARCHAR(4), date TEXT)"
             Construct-Query $q $sqlDB
 
         # User info
-        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, name TEXT, amount INTEGER, free INTEGER, locked INTEGER, date DATETIME)"
+        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, name TEXT, amount INTEGER, free INTEGER, locked INTEGER, date TEXT)"
+            Construct-Query $q $sqlDB
+
+        # autoTrade order data
+        [string]$q = "CREATE TABLE orderInfo (symbol TEXT PRIMARY KEY, targetAsset TEXT, quoteAsset TEXT, orderID INTEGER, transactTime INTEGER, origQty INTEGER, executedQty INTEGER, cumulativeQuoteQty INTEGER, status TEXT, type TEXT, side VARCHAR(4), acqPrice INTEGER, tradeId INTEGER, date TEXT)"
             Construct-Query $q $sqlDB
     }
 
