@@ -8,6 +8,35 @@
 #>
 
 # ---------------------------------
+# Parameters
+# ---------------------------------
+param(
+    # Globally control log verbosity
+    # Verbosity meaning: Log to console as well
+    [bool]$logConsole = $true,
+    
+    # Maximum quantity for $quoteAsset
+    [int]$quoteAssetLimit = 9999,
+    
+    # How to handle an excess of quoteAsset during orders.
+    [string]$quoteAssetLimitViolation = "CONTINUE",
+        # The following params are applicable:
+        # CONTINUE = Ignore limit violation
+        # OVERRIDE = Override existing quantity with limit
+        # ABORT    = Cancel order with limit violation
+    
+    # How to handle a deficiency of quoteAsset during orders.
+    [string]$quoteAssetInsufficency = "ABORT",
+        # The following params are applicable:
+        # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
+        # ABORT    = Cancel order with insufficient quoteAsset amount
+    
+    # Decides whether all orders should be executed for real or not.
+    [bool]$testOrders = $true
+
+)
+
+# ---------------------------------
 # Import external modules
 # ---------------------------------
 . "./modules/sqlBackend.ps1"
@@ -17,29 +46,6 @@
 # VARS
 # ---------------------------------
 [string]$logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
-
-# Globally control log verbosity
-# Verbosity meaning: Log to console as well
-[bool]$logVerbosity = $true
-
-# User-defined maximum for $quoteAsset
-[int]$quoteAssetLimit = 100
-
-# How to handle an excess of quoteAsset during orders.
-[string]$quoteAssetLimitViolation = "CONTINUE"
-    # The following params are applicable:
-    # CONTINUE = Ignore limit violation
-    # OVERRIDE = Override existing quantity with limit
-    # ABORT    = Cancel order with limit violation
-
-# How to handle a deficiency of quoteAsset during orders.
-[string]$quoteAssetInsufficency = "ABORT"
-    # The following params are applicable:
-    # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
-    # ABORT    = Cancel order with insufficient quoteAsset amount
-
-# Decides whether all orders should be executed for real or not.
-[bool]$testOrders = $true
 
 # Custom symbols
 $chkMrk = [Char]8730
@@ -61,7 +67,7 @@ function log {
 
     # Verbose output
     # Override $verbose if verbosity has been globally enabled
-    if ($logVerbosity) {$verbose = $true}
+    if ($logConsole) {$verbose = $true}
 
     if ($verbose) {
         switch ($logSymbol) {
@@ -90,19 +96,101 @@ function log {
     }
 }
 
+function Conduct-Order {
+    param(
+        [string]$targetAsset,
+        [string]$quoteAsset,
+        [string]$side,
+        [string]$sideMode,
+        [string]$type,
+        [string]$quantity
+    )
+    
+    log "Attempting to send order to Binance..." ">"
+
+    #write-host "Got: $targetasset , $quoteasset , $side , $sidemode , $type , $quantity"
+        
+    # Send order
+    [bool]$ordersuccess = $false
+    [bool]$nocomplete = $false
+    if ($sideMode -like "QUOTE") {
+        try {
+            $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                            -quoteSymbol $quoteAsset `
+                                            -side $side `
+                                            -type $Type `
+                                            -quoteQty $quantity `
+                                            -test $testOrders `
+                                            -ErrorAction SilentlyContinue
+        } catch {
+            $nocomplete = $true
+        }                                                 
+    } elseIf ($sideMode -like "ASSET") {
+        try {
+            $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                            -quoteSymbol $quoteAsset `
+                                            -side $side `
+                                            -type $Type `
+                                            -Qty $quantity `
+                                            -test $testOrders `
+                                            -ErrorAction SilentlyContinue
+        } catch {
+            $nocomplete = $true
+        }    
+    } else {
+        $nocomplete = $true
+        log "> Unkown order side: $($sideMode)" "X"
+        log "  Order was not dispatched." "X"
+    }
+        
+    if ($nocomplete) {
+        # Check if the last command was successful, and if it was from invoke-webrequest
+        #if ($error[0].InvocationInfo.MyCommand.Name -like "Invoke-WebRequest") {}
+        $err = ($error[0].errordetails.message | convertfrom-json)
+
+        log "Order was not executed by Binance." "X"
+        log "API response: '$($err.code) - $($err.msg)'" "X"
+    } else {
+        log "Order sent to binance successfully." "${chkMrk}"
+
+        Write-Output ($r.content | convertfrom-json) >> $logFile
+
+        [datetime]$orderTime = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
+        $ordersuccess = $true
+    }
+
+    # Store order data
+    [bool]$complete = $false
+    if ($ordersuccess -and !($testOrders)) {
+        $orderData = $r.content | convertfrom-json
+        
+        $global:q = "INSERT INTO orderInfo (symbol,targetAsset,quoteAsset,orderID,transactTime,origQty,executedQty,cumulativeQuoteQty,status,type,side,acqPrice,tradeId,date) `
+                     VALUES ('$($orderData.symbol)','$($a.targetAsset)','$($a.quoteAsset)','$($orderData.orderId)','$($orderData.transactTime)','$($orderData.origQty)','$($orderData.executedQty)','$($orderData.cummulativeQuoteQty)','$($orderData.status)','$($orderData.type)','$($orderData.side)','$($orderData.fills.price)','$($orderData.fills.TradeID)','${orderTime}')"
+        Construct-Query $q -NoTargetDB $true
+
+        $complete = $true
+    }
+
+    return $complete
+}
+
 # ---------------------------------
 # MAIN
 # ---------------------------------
 Write-Host "[$(Get-Date -Format 'HH:mm:ss')]  -  Script begin..." -fore green
 
-if (!($logVerbosity)) {
+if (!($logConsole)) {
     Write-Host ""
     Write-Host "CAUTION" -fore yellow -back Black
     Write-Host "No verbose output enabled." -fore Yellow
-    Write-Host "Please consult '" -NoNewLine -fore yellow
+    Write-Host "Logging only to: '" -NoNewLine -fore yellow
         Write-Host ${logFile} -NoNewLine -fore cyan
         Write-host "'." -fore Yellow
     Write-Host ""
+}
+
+if ($testOrders) {
+    log "CAUTION: All orders will be sent as a test only!" "!"
 }
 
 # Create log dir if it does not exist yet
@@ -136,7 +224,7 @@ if ($exchange_maintenance) {
     Write-Host "    Binance is under maintenance." -fore red
     exit
 } else {
-    log "> Binance is accessible."
+    log "> Binance is accessible." "$chkMrk"
 }
 
 # Create list of potential orders
@@ -197,10 +285,11 @@ if ($marketOrders.count -ge 1) {
             $cleared = $true
             $stall = $false
         } else {
+            # Wait for schedule if 'retryOnPrematurity' has been set to TRUE
             if ($a.options.retryonprematurity -eq $true) {
                 while ($stall) {
                     if ($now -gt $schedule) {
-                        log "Arrived at schedule" "i"
+                        log "Arrived at schedule." "i"
                         $stall = $false
                     }
 
@@ -277,51 +366,12 @@ if ($marketOrders.count -ge 1) {
 
             # Abort order execution if $skip has been set to true
             if (!($skip)) {
-                log "Attempting to send order to Binance..." ">"
-        
-                # Send order
-                $nocpmplete = $false
-                if ($a.sideMode -like "QUOTE") {
-                    try {
-                        $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
-                                                        -quoteSymbol $a.quoteAsset `
-                                                        -side $a.side `
-                                                        -type $order.Type `
-                                                        -quoteQty $quantity `
-                                                        -test $testOrders `
-                                                        -ErrorAction SilentlyContinue
-                    } catch {
-                        $nocomplete = $true
-                    }                                                 
-                } elseIf ($a.sideMode -like "ASSET") {
-                    try {
-                        $global:r = Set-BinanceSpotOrder -symbol $a.targetAsset `
-                                                        -quoteSymbol $a.quoteAsset `
-                                                        -side $a.side `
-                                                        -type $order.Type `
-                                                        -Qty $a.quantity `
-                                                        -test $testOrders `
-                                                        -ErrorAction SilentlyContinue
-                    } catch {
-                        $nocomplete = $true
-                    }    
-                } else {
-                    $nocomplete = $true
-                    log "> Unkown order side: $($a.sideMode)" "X"
-                    log "  Order was not dispatched." "X"
-                }
-                    
-                if ($nocomplete) {
-                    # Check if the last command was successful, and if it was from invoke-webrequest
-                    #if ($error[0].InvocationInfo.MyCommand.Name -like "Invoke-WebRequest") {}
-                    $err = ($error[0].errordetails.message | convertfrom-json)
-
-                    log "Order was not executed by Binance." "X"
-                    log "API response: '$($err.code) - $($err.msg)'" "X"
-                } else {
-                    log "Order sent to binance successfully." "${chkMrk}"
-                    Write-Output $r >> $logFile
-                }
+                $order = Conduct-Order  -targetAsset $a.targetAsset `
+                                        -quoteAsset $a.quoteAsset `
+                                        -sideMode $a.sideMode `
+                                        -side $a.side `
+                                        -type $order.Type `
+                                        -quantity $quantity
             }
         }
         log "END processing order #${count}."
