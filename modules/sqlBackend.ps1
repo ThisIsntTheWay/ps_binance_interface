@@ -71,11 +71,11 @@ function Create-BinanceDB {
             Construct-Query $q $sqlDB
 
         # User info
-        [string]$q = "CREATE TABLE userInfo (symbol VARCHAR(15) PRIMARY KEY, name TEXT, amount INTEGER, free INTEGER, locked INTEGER, date TEXT)"
+        [string]$q = 'CREATE TABLE userInfo (id INTEGER UNIQUE, symbol VARCHAR(15), name TEXT, amount INTEGER, free INTEGER, locked INTEGER, date TEXT, PRIMARY KEY("id" AUTOINCREMENT))'
             Construct-Query $q $sqlDB
 
         # autoTrade order data
-        [string]$q = "CREATE TABLE orderInfo (symbol TEXT PRIMARY KEY, targetAsset TEXT, quoteAsset TEXT, orderID INTEGER, transactTime INTEGER, origQty INTEGER, executedQty INTEGER, cumulativeQuoteQty INTEGER, status TEXT, type TEXT, side VARCHAR(4), acqPrice INTEGER, tradeId INTEGER, date TEXT)"
+        [string]$q = 'CREATE TABLE orderInfo (id INTEGER UNIQUE, symbol TEXT, targetAsset TEXT, quoteAsset TEXT, orderID INTEGER, transactTime INTEGER, origQty INTEGER, executedQty INTEGER, cumulativeQuoteQty INTEGER, status TEXT, type TEXT, side VARCHAR(4), acqPrice INTEGER, tradeId INTEGER, date TEXT, PRIMARY KEY("id" AUTOINCREMENT))'
             Construct-Query $q $sqlDB
     }
 
