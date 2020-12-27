@@ -16,7 +16,6 @@
 # ---------------------------------
 # VARS
 # ---------------------------------
-[string]$QuoteAssetFilterList = "./filter/QuoteAssetFilterList.txt"
 [string]$logFile = "./log/autoTrade_$(Get-Date -Format "dd-MM-yyyy_HH-mm-ss").txt"
 
 # Globally control log verbosity
@@ -34,7 +33,7 @@
     # ABORT    = Cancel order with limit violation
 
 # How to handle a deficiency of quoteAsset during orders.
-[string]$quoteAssetInsufficency = "OVERRIDE"
+[string]$quoteAssetInsufficency = "ABORT"
     # The following params are applicable:
     # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
     # ABORT    = Cancel order with insufficient quoteAsset amount
@@ -52,10 +51,13 @@ function log {
     param(
         [string]$in,
         [string]$logSymbol = "-",
-        [bool]$verbose = $false
+        [bool]$verbose = $false,
+        [bool]$noWriteToFile = $false
     )
 
-    Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" >> $logfile
+    # Write to log if so enabled
+    if (!($noWriteToFile)) { Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" >> $logfile } 
+    else { Write-Output "[$(Get-Date -Format 'HH:mm:ss')] ($logSymbol) $in" }
 
     # Verbose output
     # Override $verbose if verbosity has been globally enabled
@@ -162,7 +164,7 @@ if ($marketOrders.count -ge 1) {
 
     # Workaround for acquiring order count 
     [int]$count = 0
-    foreach ($a in $order.orders) {$count ++}
+    foreach ($global:a in $order.orders) {$count ++}
 
     log "Parsing order collection '$($order.Name)'."
     log "> Collection type is: '$($order.Type)'" "i"
@@ -179,25 +181,56 @@ if ($marketOrders.count -ge 1) {
         log "> Side mode: $($a.sideMode)"
         log "> Quantity: $($a.quantity)"
         log "> Scheduled for: $($a.schedule)"
+        log "> Order options:"
+        log "  - Require sufficient wallet balance: $($a.options.requireWallet)"
+        log "  - Retry if order is ahead of schedule: $($a.options.retryOnPrematurity)"
+        log "    > Retry interval (seconds): $($a.options.retryInterval)"
 
         # Check if this order is scheduled
         [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
-        [datetime]$schedule =[datetime]::ParseExact($a.schedule,"dd.MM.yyyy HH:mm:ss",$null)
+        [datetime]$schedule = [datetime]::ParseExact($a.schedule,"dd.MM.yyyy HH:mm:ss",$null)
 
         [bool]$cleared = $false
+        [bool]$stall = $true
         if ($now -gt $schedule) {
             log "- Cleared for execution." "i"
             $cleared = $true
+            $stall = $false
         } else {
-            log "- Not yet cleared for execution." "X"
+            if ($a.options.retryonprematurity -eq $true) {
+                while ($stall) {
+                    if ($now -gt $schedule) {
+                        log "Arrived at schedule" "i"
+                        $stall = $false
+                    }
+
+                    [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
+                    
+                    # Create ETA
+                    $timespan = new-timespan -start $now -end $schedule
+                    $ETA = "$($timespan.Days)d, $($timespan.Hours)hrs, $($timespan.seconds)sec."
+
+                    log "- Not yet cleared for execution." "X"
+                    log "ETA: ${ETA}" ">"
+                    log "Waiting $($a.options.retryInterval) SECONDS." ">" -noWriteToFile $true
+
+                    Start-Sleep -s $a.options.retryInterval
+                }
+                
+            } else {
+                log "- Not yet cleared for execution." "X"
+                $stall = $false
+            }
         }
 
         # Process order if cleared
         if ($cleared) {
             # Obtain wallet info
-            $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,free
-            $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
-            #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
+            if ($a.options.requireWallet -eq $true) {
+                $wallet = ((Get-BinanceWalletInfo).content | convertfrom-json) | select coin,free
+                $global:walletQuote = $wallet | where {$_.coin -like $a.quoteAsset}
+                #$global:walletFree = [Math]::Floor([decimal]($walletQuote.free))
+            }
 
             $quantity = $a.quantity
 
@@ -223,18 +256,20 @@ if ($marketOrders.count -ge 1) {
                 }
 
                 # Check if order exceeds max available quoteAsset in user wallet
-                if (($walletQuote.Free -as [Decimal]) -lt ($quantity -as [Decimal])) {
-                    log "User does not possess sufficient '$($a.quoteAsset)' to cover this order." "!"
-                    log "> Available: $($walletQuote.Free) | Required: ${quantity}" "!"
-
-                    # Decide how to continue
-                    switch ($quoteAssetInsufficency) {
-                        "OVERRIDE" {
-                            log "> Quote asset quantity (${quantity}) has been lowered to max. availability ($($walletQuote.free))." "i"
-                            $quantity = $walletQuote.free
-                        } "ABORT" {
-                            log "> This order will be discarded." "X"
-                            $skip = $true
+                if ($a.options.requireWallet -eq $true) {
+                    if (($walletQuote.Free -as [Decimal]) -lt ($quantity -as [Decimal])) {
+                        log "User does not possess sufficient '$($a.quoteAsset)' to cover this order." "!"
+                        log "> Available: $($walletQuote.Free) | Required: ${quantity}" "!"
+    
+                        # Decide how to continue
+                        switch ($quoteAssetInsufficency) {
+                            "OVERRIDE" {
+                                log "> Quote asset quantity (${quantity}) has been lowered to max. availability ($($walletQuote.free))." "i"
+                                $quantity = $walletQuote.free
+                            } "ABORT" {
+                                log "> This order will be discarded." "X"
+                                $skip = $true
+                            }
                         }
                     }
                 }
@@ -294,7 +329,7 @@ if ($marketOrders.count -ge 1) {
 }
 
 if ($limitOrders.count -ge 1) {
-    $global:order = (get-content $limitOrders.FullName) | convertfrom-json
+    log "LIMIT ORDERS NOT YET IMPLEMENTED" "X"
 }
 
 # END
