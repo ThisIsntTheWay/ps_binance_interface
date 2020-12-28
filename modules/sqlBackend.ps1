@@ -75,7 +75,7 @@ function Create-BinanceDB {
             Construct-Query $q $sqlDB
 
         # autoTrade order data
-        [string]$q = 'CREATE TABLE orderInfo (id INTEGER UNIQUE, symbol TEXT, targetAsset TEXT, quoteAsset TEXT, orderID INTEGER, transactTime INTEGER, origQty INTEGER, executedQty INTEGER, cumulativeQuoteQty INTEGER, status TEXT, type TEXT, side VARCHAR(4), acqPrice INTEGER, tradeId INTEGER, date TEXT, PRIMARY KEY("id" AUTOINCREMENT))'
+        [string]$q = 'CREATE TABLE orderInfo (id INTEGER UNIQUE, orderCollection TEXT, orderDescription TEXT, symbol TEXT, targetAsset TEXT, quoteAsset TEXT, orderID INTEGER, transactTime INTEGER, origQty INTEGER, executedQty INTEGER, cumulativeQuoteQty INTEGER, status TEXT, type TEXT, side VARCHAR(4), acqPrice INTEGER, tradeId INTEGER, date TEXT, PRIMARY KEY("id" AUTOINCREMENT))'
             Construct-Query $q $sqlDB
     }
 
