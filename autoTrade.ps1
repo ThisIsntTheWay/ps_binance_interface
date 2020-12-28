@@ -26,7 +26,7 @@ param(
         # ABORT    = Cancel order with limit violation
     
     # How to handle a deficiency of quoteAsset during orders.
-    [string]$quoteAssetInsufficency = "ABORT",
+    [string]$quoteAssetInsufficency = "OVERRIDE",
         # The following params are applicable:
         # OVERRIDE = Replace quantity of quoteAsset with max amount of user wallet
         # ABORT    = Cancel order with insufficient quoteAsset amount
@@ -98,6 +98,8 @@ function log {
 
 function Conduct-Order {
     param(
+        [string]$orderCollection = "Unkown",
+        [string]$orderDescription = "Unspecified",
         [string]$targetAsset,
         [string]$quoteAsset,
         [string]$side,
@@ -108,7 +110,7 @@ function Conduct-Order {
     
     log "Attempting to send order to Binance..." ">"
 
-    #write-host "Got: $targetasset , $quoteasset , $side , $sidemode , $type , $quantity"
+    write-host "Got: $targetasset , $quoteasset , $side , $sidemode , $type , $quantity"
         
     # Send order
     [bool]$ordersuccess = $false
@@ -151,7 +153,7 @@ function Conduct-Order {
         log "Order was not executed by Binance." "X"
         log "API response: '$($err.code) - $($err.msg)'" "X"
     } else {
-        log "Order sent to binance successfully." "${chkMrk}"
+        log "Binance has successfully completed the order." "${chkMrk}"
 
         Write-Output ($r.content | convertfrom-json) >> $logFile
 
@@ -164,9 +166,13 @@ function Conduct-Order {
     if ($ordersuccess -and !($testOrders)) {
         $orderData = $r.content | convertfrom-json
         
-        $global:q = "INSERT INTO orderInfo (symbol,targetAsset,quoteAsset,orderID,transactTime,origQty,executedQty,cumulativeQuoteQty,status,type,side,acqPrice,tradeId,date) `
-                     VALUES ('$($orderData.symbol)','$($a.targetAsset)','$($a.quoteAsset)','$($orderData.orderId)','$($orderData.transactTime)','$($orderData.origQty)','$($orderData.executedQty)','$($orderData.cummulativeQuoteQty)','$($orderData.status)','$($orderData.type)','$($orderData.side)','$($orderData.fills.price)','$($orderData.fills.TradeID)','${orderTime}')"
+        $global:q = "INSERT INTO orderInfo (symbol,orderCollection,orderDescription,targetAsset,quoteAsset,orderID,transactTime,origQty,executedQty,cumulativeQuoteQty,status,type,side,acqPrice,tradeId,date) `
+                     VALUES ('$($orderData.symbol)','${orderCollection}','${orderDescription}','$($a.targetAsset)','$($a.quoteAsset)','$($orderData.orderId)','$($orderData.transactTime)','$($orderData.origQty)','$($orderData.executedQty)','$($orderData.cummulativeQuoteQty)','$($orderData.status)','$($orderData.type)','$($orderData.side)','$($orderData.fills.price)','$($orderData.fills.TradeID)','${orderTime}')"
         Construct-Query $q -NoTargetDB $true
+
+        <# Update wallet (userInfo table)
+        [string]$q = "INSERT INTO userInfo (symbol,name,amount,free,locked,date) VALUES ('$($a.targetAsset)','$($a.targetAsset)','$($orderData.executedQty)','$($orderData.executedQty)','0','${orderTime}')"
+        Construct-Query $q -NoTargetDB $true#>
 
         $complete = $true
     }
@@ -252,7 +258,7 @@ if ($marketOrders.count -ge 1) {
 
     # Workaround for acquiring order count 
     [int]$count = 0
-    foreach ($global:a in $order.orders) {$count ++}
+    foreach ($a in $order.orders) {$count ++}
 
     log "Parsing order collection '$($order.Name)'."
     log "> Collection type is: '$($order.Type)'" "i"
@@ -262,7 +268,7 @@ if ($marketOrders.count -ge 1) {
     [int]$count = 0
     foreach ($a in $order.orders) {
         $count++
-        log "BEGIN processing order #${count}..."
+        log "BEGIN processing order #${count}..." "i"
         log "> Target asset: $($a.targetAsset)"
         log "> Quote asset: $($a.quoteAsset)"
         log "> Side: $($a.side)"
@@ -273,6 +279,14 @@ if ($marketOrders.count -ge 1) {
         log "  - Require sufficient wallet balance: $($a.options.requireWallet)"
         log "  - Retry if order is ahead of schedule: $($a.options.retryOnPrematurity)"
         log "    > Retry interval (seconds): $($a.options.retryInterval)"
+
+        $sideMode = $a.sideMode
+
+        # Additional options
+        if ($a.options.liquidate -and $a.side -like "SELL") {
+            log "> Order has set the LIQUIDATION flag" "!"
+            log "  > Liquidation mode: $($a.options.liquidateMode)" ">"
+        }
 
         # Check if this order is scheduled
         [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
@@ -325,7 +339,7 @@ if ($marketOrders.count -ge 1) {
 
             # Verify that $a.quantity does not exceed $quoteAssetLimit and does not exceed max available funds in wallet.
             $skip = $false
-            if ($a.sideMode -like "QUOTE") {
+            if ($sideMode -like "QUOTE") {
                 # Check quoteAssetLimit
                 if ($quantity -gt $quoteAssetLimit) {
                         log "This order exceeds the quote asset limit of '${quoteAssetLimit}'." "!"
@@ -363,19 +377,59 @@ if ($marketOrders.count -ge 1) {
                     }
                 }
             }
+            
+            # Handle liquidation
+            if ($a.options.liquidate) {
+                switch ($a.options.liquidateMode) {
+                    "All" {
+                        Start-Sleep -s 2
+                        # Obtain wallet info
+
+                        $global:walletInfo = ((Get-BinanceWalletInfo).content | convertfrom-json) | where {$_.Coin -like $a.targetAsset}
+                        $sideMode = "ASSET"
+
+                        # WORKAROUND to defer insufficient balance error reported by Binance
+                            # This will generate a malformed API reuquest, but this won't matter.
+                            # The goal is to somehow sync all balances.
+
+                            
+                            <#   $bURI = "/api/v3/openOrders"
+                                $params = "symbol=$($a.targetAsset)$($a.quoteAsset)"
+                            Construct-BinanceAPIRequest -bURI $bURI -params $params -method "DELETE" -apiKey $true -signature $true #>
+
+                        # Truncate/round DOWN quantity because otherwise Binance thinks the user has an insufficient balance
+                        $quantity = $walletInfo.free -0.06 #[math]::Round(($walletInfo.free -as [Decimal]),4) - 0.0009
+                        log "> Liqudation [All]: Will sell $($quantity) $($a.targetAsset)." "!"
+
+    
+                    } "LastOrder" {
+                        # Obtain wallet info
+                        $global:walletInfo = ((Get-BinanceWalletInfo).content | convertfrom-json) | where {$_.Coin -like $a.targetAsset}
+                        $sideMode = "ASSET"
+
+                        # Truncate/round DOWN quantity because otherwise Binance thinks the user has an insufficient balance
+                        $quantity = [math]::Round(($walletInfo.free -as [Decimal]),4) - 0.0009
+                        log "> Liqudation [LastOrder]: Will sell $($quantity) $($a.targetAsset)." "!"
+    
+                    }
+                }
+            }
+        
 
             # Abort order execution if $skip has been set to true
             if (!($skip)) {
-                $order = Conduct-Order  -targetAsset $a.targetAsset `
-                                        -quoteAsset $a.quoteAsset `
-                                        -sideMode $a.sideMode `
-                                        -side $a.side `
-                                        -type $order.Type `
-                                        -quantity $quantity
+                $o = Conduct-Order  -orderCollection $order.Name`
+                                    -orderDescription $a.description`
+                                    -targetAsset $a.targetAsset `
+                                    -quoteAsset $a.quoteAsset `
+                                    -sideMode $sideMode `
+                                    -side $a.side `
+                                    -type $order.Type `
+                                    -quantity $quantity
             }
         }
-        log "END processing order #${count}."
     }
+    log "END processing order #${count}." "i"
 }
 
 if ($limitOrders.count -ge 1) {
