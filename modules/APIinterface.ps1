@@ -160,7 +160,7 @@ function Set-BinanceSpotOrder {
             [int]$price,
 
         [Parameter(Mandatory=$false)]
-            [bool]$test
+            [bool]$test = $false
     )
 
     [boolean]$synError = $false
@@ -199,8 +199,8 @@ function Set-BinanceSpotOrder {
         }
     }
 
-    $bURI = "/api/v3/order"
-    #$bURI = "/api/v3/order/test"
+    if ($test) {$bURI = "/api/v3/order/test"}
+    else {$bURI = "/api/v3/order"}
 
     # Pass to API Request constructor
     if (!($synError)) {
