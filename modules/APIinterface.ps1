@@ -157,7 +157,7 @@ function Set-BinanceSpotOrder {
             [int]$quoteQty = 0,
 
         [Parameter(Mandatory=$false)]
-            [int]$price,
+            [string]$price,
 
         [Parameter(Mandatory=$false)]
             [bool]$test = $false
