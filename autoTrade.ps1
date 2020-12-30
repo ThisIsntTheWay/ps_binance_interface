@@ -16,10 +16,10 @@ param(
     [bool]$logConsole = $true,
     
     # Maximum quantity for $quoteAsset
-    [int]$quoteAssetLimit = 9999,
+    [int]$quoteAssetLimit = 243,
     
     # How to handle an excess of quoteAsset during orders.
-    [string]$quoteAssetLimitViolation = "CONTINUE",
+    [string]$quoteAssetLimitViolation = "IGNORE",
         # The following params are applicable:
         # CONTINUE = Ignore limit violation
         # OVERRIDE = Override existing quantity with limit
@@ -105,37 +105,62 @@ function Conduct-Order {
         [string]$side,
         [string]$sideMode,
         [string]$type,
+        [string]$price,
         [string]$quantity
     )
     
     log "Attempting to send order to Binance..." ">"
 
-    write-host "Got: $targetasset , $quoteasset , $side , $sidemode , $type , $quantity"
+    write-host "Got: $targetasset , $quoteasset , $side , $sidemode , $type , $quantity , $price"
         
     # Send order
     [bool]$ordersuccess = $false
     [bool]$nocomplete = $false
     if ($sideMode -like "QUOTE") {
         try {
-            $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
-                                            -quoteSymbol $quoteAsset `
-                                            -side $side `
-                                            -type $Type `
-                                            -quoteQty $quantity `
-                                            -test $testOrders `
-                                            -ErrorAction SilentlyContinue
+            if ($type -like "LIMIT") {
+                $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                                -quoteSymbol $quoteAsset `
+                                                -side $side `
+                                                -type $Type `
+                                                -Qty $quantity `
+                                                -price $price `
+                                                -test $testOrders `
+                                                -ErrorAction SilentlyContinue
+            } else {
+                $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                                -quoteSymbol $quoteAsset `
+                                                -side $side `
+                                                -type $Type `
+                                                -quoteQty $quantity `
+                                                -test $testOrders `
+                                                -ErrorAction SilentlyContinue
+
+            }
         } catch {
             $nocomplete = $true
         }                                                 
     } elseIf ($sideMode -like "ASSET") {
         try {
-            $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
-                                            -quoteSymbol $quoteAsset `
-                                            -side $side `
-                                            -type $Type `
-                                            -Qty $quantity `
-                                            -test $testOrders `
-                                            -ErrorAction SilentlyContinue
+            if ($type -like "LIMIT") {
+                $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                                -quoteSymbol $quoteAsset `
+                                                -side $side `
+                                                -type $Type `
+                                                -Qty $quantity `
+                                                -price $price `
+                                                -test $testOrders `
+                                                -ErrorAction SilentlyContinue
+            } else {
+                $global:r = Set-BinanceSpotOrder -symbol $targetAsset `
+                                                -quoteSymbol $quoteAsset `
+                                                -side $side `
+                                                -type $Type `
+                                                -Qty $quantity `
+                                                -test $testOrders `
+                                                -ErrorAction SilentlyContinue
+
+            }
         } catch {
             $nocomplete = $true
         }    
@@ -150,7 +175,7 @@ function Conduct-Order {
         #if ($error[0].InvocationInfo.MyCommand.Name -like "Invoke-WebRequest") {}
         $err = ($error[0].errordetails.message | convertfrom-json)
 
-        log "Order was not executed by Binance." "X"
+        log "Order was not executed by Binance. (order type: $type)" "X"
         log "API response: '$($err.code) - $($err.msg)'" "X"
     } else {
         log "Binance has successfully completed the order." "${chkMrk}"
@@ -302,22 +327,24 @@ if ($marketOrders.count -ge 1) {
             # Wait for schedule if 'retryOnPrematurity' has been set to TRUE
             if ($a.options.retryonprematurity -eq $true) {
                 while ($stall) {
+                    # Redo datecheck to ensure max accuracy
+                    [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
+
                     if ($now -gt $schedule) {
                         log "Arrived at schedule." "i"
                         $stall = $false
+                        $cleared = $true
+                    } else {
+                        # Create ETA
+                        $timespan = new-timespan -start $now -end $schedule
+                        $ETA = "$($timespan.Days)d, $($timespan.Hours)hrs, $($timespan.Minutes)m, $($timespan.seconds)sec."
+
+                        log "- Not yet cleared for execution." "X"
+                        log "ETA: ${ETA}" ">"
+                        log "Waiting $($a.options.retryInterval) miliseconds." ">" -noWriteToFile $true
+
+                        Start-Sleep -Milliseconds $a.options.retryInterval
                     }
-
-                    [datetime]$now = [datetime]::ParseExact((Get-Date -Format 'dd.MM.yyyy HH:mm:ss'),"dd.MM.yyyy HH:mm:ss",$null)
-                    
-                    # Create ETA
-                    $timespan = new-timespan -start $now -end $schedule
-                    $ETA = "$($timespan.Days)d, $($timespan.Hours)hrs, $($timespan.seconds)sec."
-
-                    log "- Not yet cleared for execution." "X"
-                    log "ETA: ${ETA}" ">"
-                    log "Waiting $($a.options.retryInterval) SECONDS." ">" -noWriteToFile $true
-
-                    Start-Sleep -s $a.options.retryInterval
                 }
                 
             } else {
@@ -411,10 +438,29 @@ if ($marketOrders.count -ge 1) {
                         $quantity = [math]::Round(($walletInfo.free -as [Decimal]),4) - 0.0009
                         log "> Liqudation [LastOrder]: Will sell $($quantity) $($a.targetAsset)." "!"
     
-                    }
+                    } "Percentage" {
+                        Start-Sleep -s 2
+                        $global:walletInfo = ((Get-BinanceWalletInfo).content | convertfrom-json) | where {$_.Coin -like $a.targetAsset}
+                        $quantity = $walletInfo.free / 100 * $a.options.liquidatePercentage
+                        log "> Liqudation [Percentage]: Will sell ${quantity} (of $($walletInfo.free)) $($a.targetAsset) ($($a.options.liquidatePercentage)%)." "!"
+					}
                 }
             }
         
+            # WORKAROUND FOR SHITTY BINANCE API
+            if ($a.options.poseAsLimit) {
+                $skip = $true
+                $o = Conduct-Order  -orderCollection $order.Name`
+                                    -orderDescription $a.description`
+                                    -targetAsset $a.targetAsset `
+                                    -quoteAsset $a.quoteAsset `
+                                    -sideMode $sideMode `
+                                    -side $a.side `
+                                    -type "LIMIT" `
+                                    -quantity $quantity `
+                                    -price $a.options.limitPrice
+
+            }
 
             # Abort order execution if $skip has been set to true
             if (!($skip)) {
