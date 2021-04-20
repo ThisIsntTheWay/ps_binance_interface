@@ -59,7 +59,7 @@ function Create-BinanceDB {
     }
 
     if (!($response -eq 1)) {
-        # NOTE: All date fileds are purposefully created as "TEXT".
+        # NOTE: All date fields are purposefully created as "TEXT".
         #       This is because there have been some bugs trying to insert/replace DateTime vars into this column.
 
         # Base table
